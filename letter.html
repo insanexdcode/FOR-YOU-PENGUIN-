@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A Letter for Penguin 💌</title>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+  margin:0;min-height:100vh;padding:24px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:Arial,sans-serif;color:#fff0f4;
+  background:radial-gradient(ellipse at top,#501426,#16060d 65%,#060208)
+}
+
+.card{
+  max-width:650px;width:100%;padding:35px 27px;text-align:center;
+  border:1px solid #a74763;border-radius:24px;background:#210b15e8;
+  box-shadow:0 0 40px #9c17444d
+}
+
+h1{font:normal 36px Georgia,serif;color:#ffb4c8}
+
+.message{
+  font:17px/1.9 Georgia,serif;
+  color:#f3d4de;
+  white-space:pre-line
+}
+
+audio{width:100%;margin:20px 0}
+
+a.button{
+  display:block;text-decoration:none;color:white;font-weight:bold;
+  background:linear-gradient(90deg,#a91e4b,#ed668c);
+  border-radius:12px;padding:15px;margin-top:14px;
+  cursor:pointer
+}
+
+a.back{background:transparent;border:1px solid #824055}
+
+.heart{font-size:35px}
+
+/* Heart animation opens over this page.
+   The music player stays alive underneath. */
+#heartFrame{
+  position:fixed;
+  inset:0;
+  width:100%;
+  height:100%;
+  border:0;
+  display:none;
+  z-index:9999;
+  background:#060208;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card" id="letterCard">
+  <div class="heart">💗</div>
+
+  <h1>Dear Hooria Ji,</h1>
+
+  <div class="message">Eight years ago, we were just two little souls playing together, 
+    never knowing we'd find our way back to each other.
+    And then, on June 5, 2026,
+    life brought my Penguin back to me.
+   Thank you for everything you gave me back bestfriendji
+
+Your Kuchupuchu. ❤️</div>
+
+  <audio id="bgMusic" controls loop>
+    <source src="music.mp3" type="audio/mpeg">
+    Your browser does not support audio.
+  </audio>
+
+  <a class="button" href="heart.html" id="openHeart">
+    Open Your Animated Heart ❤️
+  </a>
+
+  <a class="button back" href="index.html">
+    Back to the Beginning ↩
+  </a>
+</div>
+
+<!-- The animation loads here without leaving the letter page -->
+<iframe
+  id="heartFrame"
+  title="Animated Heart"
+  allow="autoplay"
+></iframe>
+
+<script>
+if(sessionStorage.getItem("hooriaAccess") !== "yes"){
+  window.location.replace("index.html");
+}
+
+const music = document.getElementById("bgMusic");
+const heartFrame = document.getElementById("heartFrame");
+const openHeart = document.getElementById("openHeart");
+
+openHeart.addEventListener("click", function(e){
+  e.preventDefault();
+
+  // Keep the existing music player running.
+  // Load the animation without navigating away.
+  heartFrame.src = "heart.html";
+  heartFrame.style.display = "block";
+});
+</script>
+
+</body>
+</html>

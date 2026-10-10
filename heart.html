@@ -1,0 +1,571 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Love Heart</title>
+
+<style>
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: #060208;
+  color: #ffe4ec;
+  font-family: Arial, sans-serif;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  overflow: hidden;
+}
+
+.stage {
+  width: min(96vw, 800px);
+  height: min(88vw, 800px);
+  max-height: 96vh;
+  flex-shrink: 0;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+</style>
+</head>
+
+<body>
+<div class="stage">
+  <canvas id="cv"
+    aria-label="Animated heart filled with love in 20 languages">
+  </canvas>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+const SC = 21;
+const OY = 20;
+const DURATION = 10;
+const TICK = 16;
+const ANIM = 42;
+const LIFT = 34;
+const GAP = 7;
+const SIZES = [9, 10, 11, 12];
+const FONT = "Arial";
+const BG = "#060208";
+
+const PHRASES = [
+  "I love you", "Seni seviyorum", "Te amo", "Je t'aime",
+  "Ich liebe dich", "Ti amo", "Eu te amo", "Я тебя люблю",
+  "사랑해", "愛してる", "我爱你", "मैं तुमसे प्यार करता हूँ",
+  "Σ' αγαπώ", "Ik hou van jou", "Jag älskar dig", "Kocham cię",
+  "ฉันรักเธอ", "Anh yêu em", "Aku cinta kamu", "Я тебе кохаю"
+];
+
+const FLASH = [1.0, 0.78, 0.78];
+const BGC = [6/255, 2/255, 8/255];
+
+const canvas = document.getElementById("cv");
+const ctx = canvas.getContext("2d");
+
+let W = 800, H = 800, DPR = 1;
+let rng, ORDER = [], active = [], mainIds = [];
+let spawning = true, acc = 0, nextIndex = 0;
+let startTime = 0, timer = null;
+let shimmerTimer = null;
+let fontCache = {};
+
+function randomGenerator(seed) {
+  let state = seed >>> 0;
+  return function() {
+    state = (Math.imul(1664525, state) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
+function rand(a, b) {
+  return a + (b-a) * rng();
+}
+
+function choice(a) {
+  return a[Math.floor(rng() * a.length)];
+}
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function clamp(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+function mix(a, b, k) {
+  return a.map((v, i) => v + (b[i]-v)*k);
+}
+
+function dim(c, k) {
+  return c.map(v => v*k);
+}
+
+function hx(c) {
+  return "#" + c.map(v =>
+    Math.round(clamp(v)*255).toString(16).padStart(2, "0")
+  ).join("");
+}
+
+function sin(v) {
+  return Math.sin(Math.PI*v);
+}
+
+function setFont(size) {
+  ctx.font = `bold ${size}px ${FONT}`;
+}
+
+function measure(text, size) {
+  const key = size + ":" + text;
+
+  if (fontCache[key] === undefined) {
+    setFont(size);
+    fontCache[key] = ctx.measureText(text).width;
+  }
+
+  return fontCache[key];
+}
+
+function lineSpace(size) {
+  setFont(size);
+  const mt = ctx.measureText("Mg");
+
+  return Math.max(
+    size + 3,
+    (mt.actualBoundingBoxAscent || size*.75) +
+    (mt.actualBoundingBoxDescent || size*.25) + 4
+  );
+}
+
+// Original parametric heart shape.
+function heart(a) {
+  const x = 16 * Math.pow(Math.sin(a), 3);
+
+  const y = 13*Math.cos(a)
+    - 5*Math.cos(2*a)
+    - 2*Math.cos(3*a)
+    - Math.cos(4*a);
+
+  return [x*SC, y*SC+OY];
+}
+
+const POLY = Array.from({length:720}, (_, i) =>
+  heart(2*Math.PI*i/720)
+);
+
+const EDGES = POLY.map((p, i) =>
+  [p, POLY[(i+1)%POLY.length]]
+);
+
+const YMAX = Math.max(...POLY.map(p => p[1]));
+const YMIN = Math.min(...POLY.map(p => p[1]));
+const CY = (YMAX+YMIN)/2;
+
+function spans(y) {
+  const xs = [];
+
+  for (const [[x1,y1],[x2,y2]] of EDGES) {
+    if ((y1 <= y && y < y2) ||
+        (y2 <= y && y < y1)) {
+      xs.push(x1 + (y-y1)*(x2-x1)/(y2-y1));
+    }
+  }
+
+  xs.sort((a,b) => a-b);
+
+  const result = [];
+
+  for (let i=0; i+1<xs.length; i+=2) {
+    result.push([xs[i], xs[i+1]]);
+  }
+
+  return result;
+}
+
+function intersect(A, B) {
+  const out = [];
+
+  for (const a of A) {
+    for (const b of B) {
+      const lo = Math.max(a[0], b[0]);
+      const hi = Math.min(a[1], b[1]);
+
+      if (hi-lo > 14) out.push([lo, hi]);
+    }
+  }
+
+  return out;
+}
+
+function phraseCycle() {
+  let order = [];
+  let index = 0;
+
+  return function() {
+    if (index >= order.length) {
+      order = shuffle(PHRASES.slice());
+      index = 0;
+    }
+
+    return order[index++];
+  };
+}
+
+function mathDist(x, y) {
+  return Math.hypot(
+    x/(16*SC),
+    (y-CY)/(14.5*SC)
+  );
+}
+
+function build() {
+  const cycle = phraseCycle();
+  const rowH = Math.max(...SIZES.map(lineSpace)) + 4;
+  const half = rowH/2;
+  const placed = [];
+
+  for (let y=YMAX-half; y>YMIN+half; y-=rowH) {
+    const row = intersect(
+      spans(y+half),
+      spans(y-half)
+    );
+
+    for (let [lo0, hi0] of row) {
+      const lo = lo0+4;
+      const hi = hi0-4;
+      let cur = lo+rand(0,8);
+      const line = [];
+
+      while (true) {
+        let fit = null;
+
+        for (let tries=0; tries<10; tries++) {
+          const text = cycle();
+          const size = choice(SIZES);
+          const w = measure(text, size);
+
+          if (cur+w <= hi) {
+            fit = {text, size, w};
+            break;
+          }
+        }
+
+        if (!fit) break;
+
+        line.push({
+          x: cur+fit.w/2,
+          y,
+          text: fit.text,
+          size: fit.size,
+          w: fit.w
+        });
+
+        cur += fit.w+GAP;
+      }
+
+      if (!line.length) continue;
+
+      if (line.length > 1) {
+        const left = hi -
+          (line[line.length-1].x +
+           line[line.length-1].w/2);
+
+        line.forEach((p, i) => {
+          p.x += left*i/(line.length-1);
+        });
+      } else {
+        line[0].x = (lo+hi)/2;
+      }
+
+      line.forEach((p, i) => {
+        p.edge = (i===0 || i===line.length-1);
+        placed.push(p);
+      });
+    }
+  }
+
+  const wine = [0.58, 0.0, 0.09];
+  const crimson = [0.90, 0.05, 0.14];
+  const blood = [0.98, 0.10, 0.16];
+
+  for (const p of placed) {
+    p.rad = Math.min(1, mathDist(p.x, p.y));
+
+    let base = mix(wine, crimson, 0.25+0.75*p.rad);
+
+    base = mix(
+      base,
+      blood,
+      rand(0,0.35)+(p.edge ? 0.3 : 0)
+    );
+
+    p.color = base.map(v => Math.min(1,v));
+  }
+
+  const edges = placed.filter(p => p.edge);
+  const inner = placed.filter(p => !p.edge);
+
+  // Begin at the upper-right edge and travel clockwise.
+  const startAngle = Math.PI / 4;
+
+  const clockwiseAngle = p =>
+    (startAngle - Math.atan2(p.y-CY, p.x) +
+      Math.PI*2) % (Math.PI*2);
+
+  edges.sort((a,b) =>
+    clockwiseAngle(a) - clockwiseAngle(b)
+  );
+
+  // Fill the inside after the outline appears.
+  inner.sort((a,b) =>
+    -a.rad+b.rad+rand(0,0.08)
+  );
+
+  return edges.concat(inner);
+}
+
+function sx(x) {
+  return W/2+x;
+}
+
+function sy(y) {
+  return H/2-y;
+}
+
+function clearCanvas() {
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle = BG;
+  ctx.fillRect(0,0,W,H);
+}
+
+function drawText(text,x,y,size,color,alpha=1,shadow=0) {
+  setFont(size);
+
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = shadow;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  ctx.fillText(text,x,y);
+
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+}
+
+function spawn(p) {
+  const x = sx(p.x);
+  const y = sy(p.y);
+
+  p.f = 0;
+  p.dx = rand(-10,10);
+  p.shadow = {x:x+2, y:y+3};
+  p.halo = {x,y};
+  p.main = {x,y:y-LIFT};
+
+  active.push(p);
+  mainIds.push(p);
+}
+
+function animateParticle(p) {
+  p.f++;
+
+  const u = clamp(p.f/ANIM);
+  const e = 1-Math.pow(1-u,3);
+
+  const x = sx(p.x);
+  const y = sy(p.y);
+
+  const hover = (1-e)*LIFT;
+  const px = x+p.dx*(1-e);
+  const py = y-hover;
+
+  drawText(
+    p.text, p.shadow.x, p.shadow.y,
+    p.size, hx(dim(p.color,0.30)), e
+  );
+
+  drawText(
+    p.text, px, py,
+    p.size+1, hx(dim(p.color,0.20)), e*e
+  );
+
+  const flash = 0.75*sin(clamp((u-0.55)/0.45));
+
+  const col = mix(
+    mix(BGC,p.color,Math.pow(e,1.5)),
+    FLASH,
+    flash
+  );
+
+  drawText(p.text,px,py,p.size,hx(col),1,1.5);
+
+  if (u >= 1) {
+    p.main = {x,y};
+    p.done = true;
+    return false;
+  }
+
+  return true;
+}
+
+function drawCompleted() {
+  clearCanvas();
+
+  for (const p of ORDER) {
+    const x = sx(p.x);
+    const y = sy(p.y);
+
+    drawText(
+      p.text,x+2,y+3,p.size,BG,1
+    );
+
+    drawText(
+      p.text,x,y,p.size,hx(p.color),1,1.2
+    );
+  }
+}
+
+function shimmer() {
+  if (!mainIds.length) return;
+
+  const p = choice(mainIds);
+
+  drawCompleted();
+
+  drawText(
+    p.text,
+    sx(p.x),
+    sy(p.y),
+    p.size,
+    hx(mix(p.color,FLASH,0.6)),
+    1,
+    2
+  );
+
+  shimmerTimer = setTimeout(() => {
+    drawCompleted();
+    shimmerTimer = setTimeout(shimmer,140);
+  },260);
+}
+
+function frame(now) {
+  if (!startTime) startTime = now;
+
+  const rate = ORDER.length/(DURATION*1000/TICK);
+
+  if (spawning) {
+    acc += rate;
+
+    while (acc >= 1 && nextIndex < ORDER.length) {
+      acc -= 1;
+      spawn(ORDER[nextIndex++]);
+    }
+
+    if (nextIndex >= ORDER.length) {
+      spawning = false;
+    }
+  }
+
+  clearCanvas();
+
+  // Keep settled text visible while new text animates.
+  for (const p of ORDER) {
+    if (p.done) {
+      drawText(
+        p.text,
+        sx(p.x),
+        sy(p.y),
+        p.size,
+        hx(p.color),
+        1,
+        1
+      );
+    }
+  }
+
+  const still = [];
+
+  for (const p of active) {
+    if (animateParticle(p)) still.push(p);
+  }
+
+  active = still;
+
+  if (!spawning && active.length === 0) {
+    drawCompleted();
+
+    if (!shimmerTimer) shimmer();
+
+    return;
+  }
+
+  timer = requestAnimationFrame(frame);
+}
+
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = rect.width || 800;
+  H = rect.height || 800;
+
+  canvas.width = Math.round(W*DPR);
+  canvas.height = Math.round(H*DPR);
+
+  reset();
+}
+
+function reset() {
+  if (timer) cancelAnimationFrame(timer);
+  if (shimmerTimer) clearTimeout(shimmerTimer);
+
+  rng = randomGenerator(11);
+  fontCache = {};
+  ORDER = build();
+
+  active = [];
+  mainIds = [];
+
+  spawning = true;
+  acc = 0;
+  nextIndex = 0;
+  startTime = 0;
+  shimmerTimer = null;
+
+  clearCanvas();
+  timer = requestAnimationFrame(frame);
+}
+
+if (window.ResizeObserver) {
+  new ResizeObserver(resize).observe(canvas.parentElement);
+} else {
+  window.addEventListener("resize",resize);
+}
+
+resize();
+
+})();
+</script>
+</body>
+</html>
